@@ -1,6 +1,6 @@
 # ElgioPay Node.js SDK
 
-[![npm version](https://badge.fury.io/js/%40elgiosoft%2Fsofipayments-sdk.svg)](https://badge.fury.io/js/%40elgiosoft%2Fsofipayments-sdk)
+[![npm version](https://badge.fury.io/js/%40elgiosoft%2Felgiopay-sdk.svg)](https://badge.fury.io/js/%40elgiosoft%2Felgiopay-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%230074c1.svg)](http://www.typescriptlang.org/)
 
@@ -56,15 +56,15 @@ const client = new ElgioPayClient();
 // Create payment
 async function createPayment() {
   try {
-    const result = await client.createMTNCameroonPayment(
-      5000, // 5000 XAF
-      '677123456', // or '+237677123456'
-      {
-        customer_name: 'Jean Dupont',
-        reference: 'FACTURE-001'
-      }
-    );
-    
+    const result = await client.initiatePayment({
+      amount: 5000, // 5000 XAF
+      currency: 'XAF',
+      payment_method: 'mtn_mobile_money',
+      customer_phone: '+237677123456',
+      customer_name: 'Jean Dupont',
+      reference: 'FACTURE-001',
+    });
+
     console.log('Payment created:', result.transaction_id);
   } catch (error) {
     console.error('Payment failed:', error.message);
@@ -89,15 +89,15 @@ const client = new ElgioPayClient();
 
 async function createPayment(): Promise<void> {
   try {
-    const result: PaymentResponse = await client.createMTNCameroonPayment(
-      5000,
-      '677123456',
-      {
-        customer_name: 'Jean Dupont',
-        reference: 'FACTURE-001'
-      }
-    );
-    
+    const result: PaymentResponse = await client.initiatePayment({
+      amount: 5000,
+      currency: 'XAF',
+      payment_method: 'mtn_mobile_money',
+      customer_phone: '+237677123456',
+      customer_name: 'Jean Dupont',
+      reference: 'FACTURE-001',
+    });
+
     console.log('Payment created:', result.transaction_id);
   } catch (error) {
     console.error('Payment failed:', error);
@@ -110,66 +110,80 @@ async function createPayment(): Promise<void> {
 ### Client Configuration
 
 ```typescript
-const client = new SofiClient({
-  apiKey: 'your_api_key',        // Required: Your Sofi API key
-  baseURL: 'https://api.sofipayments.com', // Optional: API base URL
-  timeout: 30000                 // Optional: Request timeout in ms
+const client = new ElgioPayClient({
+  apiKey: 'your_api_key',        // Required — falls back to ELGIOPAY_API_KEY env var
+  environment: 'sandbox',        // Optional — 'sandbox' | 'prod' (default: 'prod')
+  timeout: 30000,                // Optional — request timeout in ms (default: 30000)
 });
 ```
 
 ### Payment Methods
 
+Every payment — MTN, Orange, current markets and any we add later — goes
+through a single method: `initiatePayment()`. Pick the `payment_method`
+you need and pass a `PaymentData` payload.
+
+```typescript
+// Signature
+client.initiatePayment(paymentData: PaymentData): Promise<PaymentResponse>
+
+// PaymentData
+interface PaymentData {
+  amount: number;
+  currency?: Currency;               // XAF | XOF | EUR | USD
+  payment_method: PaymentMethod;     // mtn_mobile_money | orange_money
+  customer_phone: string;            // E.164, e.g. +237677123456
+  customer_name?: string;
+  customer_email?: string;
+  reference?: string;
+  metadata?: Record<string, any>;
+  /** Optional surcharge routed to the SURCHARGE wallet — see billing profile. */
+  surcharge?: number;
+}
+```
+
 #### MTN Mobile Money (Cameroon)
 
 ```typescript
-// Cameroon-optimized method
-const result = await client.createMTNCameroonPayment(
-  amount: number,
-  customerPhone: string,
-  options?: {
-    customer_name?: string;
-    customer_email?: string;
-    reference?: string;
-    metadata?: Record<string, any>;
-  }
-);
-
-// Example
-const payment = await client.createMTNCameroonPayment(
-  1000,
-  '677123456',
-  {
-    customer_name: 'Jean Dupont',
-    customer_email: 'jean@example.com',
-    reference: 'ORDER-123',
-    metadata: { order_id: 456, product: 'Premium Plan' }
-  }
-);
+const payment = await client.initiatePayment({
+  amount: 1000,
+  currency: 'XAF',
+  payment_method: 'mtn_mobile_money',
+  customer_phone: '+237677123456',
+  customer_name: 'Jean Dupont',
+  customer_email: 'jean@example.com',
+  reference: 'ORDER-123',
+  metadata: { order_id: 456, product: 'Premium Plan' },
+});
 ```
 
 #### Orange Money (Cameroon)
 
 ```typescript
-const result = await client.createOrangeCameroonPayment(
-  2500,
-  '+237677123456',
-  {
-    customer_name: 'Marie Ngozi',
-    reference: 'INV-789'
-  }
-);
+const payment = await client.initiatePayment({
+  amount: 2500,
+  currency: 'XAF',
+  payment_method: 'orange_money',
+  customer_phone: '+237677123456',
+  customer_name: 'Marie Ngozi',
+  reference: 'INV-789',
+});
 ```
 
-#### Generic Payment
+#### Normalising Cameroon phone numbers
+
+If your customer input arrives in mixed formats (`677…`, `237…`,
+`+237…`), pipe it through `normalizeCameroonPhone()` before calling
+`initiatePayment()`.
 
 ```typescript
-const result = await client.initiatePayment({
-  amount: 5000,
+import { normalizeCameroonPhone } from '@elgiosoft/elgiopay-sdk';
+
+const payment = await client.initiatePayment({
+  amount: 1000,
   currency: 'XAF',
   payment_method: 'mtn_mobile_money',
-  customer_phone: '+237677123456',
-  customer_name: 'Jean Dupont',
-  reference: 'CUSTOM-REF'
+  customer_phone: normalizeCameroonPhone('677123456'), // → +237677123456
 });
 ```
 
@@ -190,12 +204,17 @@ if (verification.verified) {
 ### Error Handling
 
 ```typescript
-import { SofiError } from '@elgiosoft/sofipayments-sdk';
+import { ElgioPayError } from '@elgiosoft/elgiopay-sdk';
 
 try {
-  const result = await client.createMTNCameroonPayment(50, 'invalid-phone');
+  const result = await client.initiatePayment({
+    amount: 50,
+    currency: 'XAF',
+    payment_method: 'mtn_mobile_money',
+    customer_phone: 'invalid-phone',
+  });
 } catch (error) {
-  if (error instanceof SofiError) {
+  if (error instanceof ElgioPayError) {
     console.log('Error code:', error.code);
     console.log('Error message:', error.message);
     console.log('API response:', error.response);
@@ -220,7 +239,7 @@ const result = await client.createPaymentWithRetry({
 ### Phone Number Utilities
 
 ```typescript
-import { normalizeCameroonPhone, isValidCameroonPhone } from '@elgiosoft/sofipayments-sdk';
+import { normalizeCameroonPhone, isValidCameroonPhone } from '@elgiosoft/elgiopay-sdk';
 
 // Normalize phone numbers
 const normalized = normalizeCameroonPhone('677123456'); // '+237677123456'
@@ -234,7 +253,7 @@ const isInvalid = isValidCameroonPhone('123456789'); // false
 ### Amount Utilities
 
 ```typescript
-import { validateAmount, formatAmount } from '@elgiosoft/sofipayments-sdk';
+import { validateAmount, formatAmount } from '@elgiosoft/elgiopay-sdk';
 
 // Validate amounts (minimum 100 XAF)
 const isValidAmount = validateAmount(1000, 'XAF'); // true
@@ -249,18 +268,18 @@ const formatted = formatAmount(5000, 'XAF'); // "5 000 FCFA"
 ### Development/Testing
 
 ```typescript
-const client = new SofiClient({
+const client = new ElgioPayClient({
   apiKey: 'pk_test_your_sandbox_key',
-  baseURL: 'https://sandbox-api.sofipayments.com'
+  environment: 'sandbox',
 });
 ```
 
 ### Production
 
 ```typescript
-const client = new SofiClient({
+const client = new ElgioPayClient({
   apiKey: 'pk_live_your_live_key',
-  baseURL: 'https://api.sofipayments.com'
+  environment: 'prod',
 });
 ```
 
@@ -268,18 +287,24 @@ const client = new SofiClient({
 
 ```bash
 # .env file
-SOFI_API_KEY=pk_test_your_api_key
-SOFI_BASE_URL=https://sandbox-api.sofipayments.com
+ELGIOPAY_API_KEY=pk_test_your_api_key
+ELGIOPAY_ENV=sandbox
 ```
 
 ```typescript
-const client = new SofiClient({
-  apiKey: process.env.SOFI_API_KEY!,
-  baseURL: process.env.SOFI_BASE_URL
-});
+// Both are picked up automatically — no config needed.
+const client = new ElgioPayClient();
 ```
 
 ## Testing
+
+### Getting API Keys
+
+1. Sign up at [sandbox.elgiopay.com](https://sandbox.elgiopay.com)
+2. Create a new application
+3. Copy your API keys:
+   - `pk_test_...` for sandbox
+   - `pk_live_...` for production
 
 ### Test Phone Numbers
 
@@ -292,21 +317,23 @@ All sandbox payments will automatically succeed after a few seconds.
 ### Example Test
 
 ```typescript
-import { SofiClient } from '@elgiosoft/sofipayments-sdk';
+import { ElgioPayClient } from '@elgiosoft/elgiopay-sdk';
 
-describe('Sofi Payments', () => {
-  const client = new SofiClient({
+describe('ElgioPay', () => {
+  const client = new ElgioPayClient({
     apiKey: 'pk_test_sandbox_key',
-    baseURL: 'https://sandbox-api.sofipayments.com'
+    environment: 'sandbox',
   });
 
   it('should create MTN payment', async () => {
-    const result = await client.createMTNCameroonPayment(
-      1000,
-      '677123456',
-      { reference: 'TEST-001' }
-    );
-    
+    const result = await client.initiatePayment({
+      amount: 1000,
+      currency: 'XAF',
+      payment_method: 'mtn_mobile_money',
+      customer_phone: '+237677123456',
+      reference: 'TEST-001',
+    });
+
     expect(result.success).toBe(true);
     expect(result.transaction_id).toBeDefined();
   });
@@ -341,7 +368,7 @@ Set up webhooks to receive payment status updates:
 
 ```typescript
 // Express.js webhook handler
-app.post('/webhooks/sofi', (req, res) => {
+app.post('/webhooks/elgiopay', (req, res) => {
   const { transaction_id, status, amount } = req.body;
   
   if (status === 'completed') {
@@ -363,17 +390,22 @@ This SDK is written in TypeScript and provides full type definitions:
 
 ```typescript
 import {
-  SofiClient,
+  ElgioPayClient,
   PaymentResponse,
   PaymentStatusResponse,
-  SofiError,
+  ElgioPayError,
   Currency,
   PaymentMethod
-} from '@elgiosoft/sofipayments-sdk';
+} from '@elgiosoft/elgiopay-sdk';
 
 // All types are fully typed
-const client: SofiClient = new SofiClient({ apiKey: 'key' });
-const payment: PaymentResponse = await client.createMTNCameroonPayment(1000, '677123456');
+const client: ElgioPayClient = new ElgioPayClient({ apiKey: 'key' });
+const payment: PaymentResponse = await client.initiatePayment({
+  amount: 1000,
+  currency: 'XAF',
+  payment_method: 'mtn_mobile_money',
+  customer_phone: '+237677123456',
+});
 ```
 
 ## Contributing
@@ -382,10 +414,10 @@ We welcome contributions! Please feel free to submit a Pull Request.
 
 ## Support
 
-- 📖 **Documentation**: [https://docs.sofipayments.com](https://docs.sofipayments.com)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/elgiosoft/sofipayments-sdk-node/issues)
+- 📖 **Documentation**: [https://docs.elgiopay.com](https://docs.elgiopay.com)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/elgiosoft/elgiopay-sdk-node/issues)
 - 💬 **Support**: [developers@elgiosoft.com](mailto:developers@elgiosoft.com)
-- 🌐 **Website**: [https://sofipayments.com](https://sofipayments.com)
+- 🌐 **Website**: [https://elgiopay.com](https://elgiopay.com)
 
 ## License
 

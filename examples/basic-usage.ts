@@ -1,4 +1,5 @@
 import { ElgioPayClient, ElgioPayError } from '../src';
+import { normalizeCameroonPhone } from '../src/utils';
 
 // Example: Basic usage of ElgioPay Payment SDK
 // Make sure to set ELGIOPAY_API_KEY and ELGIOPAY_ENV in your .env file
@@ -17,21 +18,23 @@ async function basicUsageExample() {
 
   try {
     console.log('📱 Creating MTN Mobile Money payment...');
-    
-    // Create MTN payment for Cameroon
-    const mtnPayment = await client.createMTNCameroonPayment(
-      5000, // 5000 XAF
-      '677123456',
-      {
-        customer_name: 'Jean Dupont',
-        customer_email: 'jean.dupont@example.com',
-        reference: 'FACTURE-001',
-        metadata: {
-          order_id: 12345,
-          product: 'Premium Subscription'
-        }
-      }
-    );
+
+    // Every payment goes through initiatePayment(). Use
+    // normalizeCameroonPhone() from ../src/utils if your customer
+    // input might arrive in mixed formats (677…, 237…, +237…).
+    const mtnPayment = await client.initiatePayment({
+      amount: 5000, // 5000 XAF
+      currency: 'XAF',
+      payment_method: 'mtn_mobile_money',
+      customer_phone: normalizeCameroonPhone('677123456'),
+      customer_name: 'Jean Dupont',
+      customer_email: 'jean.dupont@example.com',
+      reference: 'FACTURE-001',
+      metadata: {
+        order_id: 12345,
+        product: 'Premium Subscription',
+      },
+    });
 
     console.log('✅ MTN Payment created successfully!');
     console.log(`   Transaction ID: ${mtnPayment.transaction_id}`);
@@ -46,14 +49,14 @@ async function basicUsageExample() {
 
     // Create Orange Money payment
     console.log('🍊 Creating Orange Money payment...');
-    const orangePayment = await client.createOrangeCameroonPayment(
-      2500, // 2500 XAF
-      '+237677123457',
-      {
-        customer_name: 'Marie Ngozi',
-        reference: 'INV-002'
-      }
-    );
+    const orangePayment = await client.initiatePayment({
+      amount: 2500, // 2500 XAF
+      currency: 'XAF',
+      payment_method: 'orange_money',
+      customer_phone: normalizeCameroonPhone('+237677123457'),
+      customer_name: 'Marie Ngozi',
+      reference: 'INV-002',
+    });
 
     console.log('✅ Orange Payment created successfully!');
     console.log(`   Transaction ID: ${orangePayment.transaction_id}`);

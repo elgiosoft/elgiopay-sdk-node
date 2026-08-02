@@ -18,7 +18,6 @@ export {
   PaymentStatusResponse,
   PaymentVerification,
   ElgioPayError,
-  CameroonPaymentOptions,
   Currency,
   PaymentMethod,
   Environment,

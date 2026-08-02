@@ -538,9 +538,3 @@ export class ElgioPayError extends Error {
   }
 }
 
-export interface CameroonPaymentOptions {
-  customer_name?: string;
-  customer_email?: string;
-  reference?: string;
-  metadata?: Record<string, any>;
-}

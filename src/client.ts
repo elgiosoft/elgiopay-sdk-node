@@ -6,9 +6,7 @@ import {
   PaymentStatusResponse,
   PaymentVerification,
   ElgioPayError,
-  CameroonPaymentOptions,
   Currency,
-  PaymentMethod,
   Environment,
   BalanceResponse,
   PayoutData,
@@ -21,7 +19,6 @@ import {
   SmsResponse,
 } from './types';
 import {
-  normalizeCameroonPhone,
   isValidCameroonPhone,
   isValidEmail,
   generateReference,
@@ -126,83 +123,6 @@ export class ElgioPayClient {
   async verifyPayment(transactionId: string): Promise<PaymentVerification> {
     const response: AxiosResponse<PaymentVerification> = await this.client.post(`/api/v1/payments/${transactionId}/verify`);
     return response.data;
-  }
-
-  /**
-   * Shortcut for MTN Mobile Money. Pins `payment_method` and defaults
-   * `currency` to XAF; everything else follows `initiatePayment()`.
-   */
-  async createMTNPayment(
-    amount: number,
-    customerPhone: string,
-    options: CameroonPaymentOptions = {},
-  ): Promise<PaymentResponse> {
-    const paymentData: PaymentData = {
-      amount,
-      payment_method: 'mtn_mobile_money',
-      customer_phone: customerPhone,
-      currency: 'XAF',
-      ...options,
-    };
-    return this.initiatePayment(paymentData);
-  }
-
-  /**
-   * Shortcut for Orange Money. Pins `payment_method` and defaults
-   * `currency` to XAF; everything else follows `initiatePayment()`.
-   */
-  async createOrangePayment(
-    amount: number,
-    customerPhone: string,
-    options: CameroonPaymentOptions = {},
-  ): Promise<PaymentResponse> {
-    const paymentData: PaymentData = {
-      amount,
-      payment_method: 'orange_money',
-      customer_phone: customerPhone,
-      currency: 'XAF',
-      ...options,
-    };
-    return this.initiatePayment(paymentData);
-  }
-
-  /**
-   * Cameroon convenience: pins currency to XAF and normalises the phone
-   * to `+237XXXXXXXX` before forwarding to `initiatePayment()`.
-   */
-  async createCameroonPayment(
-    amount: number,
-    paymentMethod: PaymentMethod,
-    customerPhone: string,
-    options: CameroonPaymentOptions = {},
-  ): Promise<PaymentResponse> {
-    const normalizedPhone = normalizeCameroonPhone(customerPhone);
-    const paymentData: PaymentData = {
-      amount,
-      payment_method: paymentMethod,
-      customer_phone: normalizedPhone,
-      currency: 'XAF',
-      ...options,
-    };
-    return this.initiatePayment(paymentData);
-  }
-
-  /** MTN + Cameroon convenience. */
-  async createMTNCameroonPayment(
-    amount: number,
-    customerPhone: string,
-    options: CameroonPaymentOptions = {},
-  ): Promise<PaymentResponse> {
-    return this.createCameroonPayment(amount, 'mtn_mobile_money', customerPhone, options);
-  }
-
-  /** Orange + Cameroon convenience. */
-  async createOrangeCameroonPayment(
-    amount: number,
-    customerPhone: string,
-    options: CameroonPaymentOptions = {},
-  ): Promise<PaymentResponse> {
-    return this.createCameroonPayment(amount, 'orange_money', customerPhone, options);
   }
 
   /**
