@@ -202,6 +202,24 @@ export class IssuingClient {
     return response.data;
   }
 
+  /**
+   * Pull funds off the card back to your app balance. Amount is in major
+   * units of the card's currency (e.g. 10 = $10 for a USD card). The card
+   * is debited exactly `amount`; your app balance is credited
+   * `amount - fee`.
+   */
+  async withdrawFromCard(
+    cardId: string | number,
+    amount: number,
+    description?: string,
+  ): Promise<IssuingItemResponse<IssuingCard>> {
+    const response = await this.client.post<IssuingItemResponse<IssuingCard>>(
+      `/api/v1/issuing/cards/${cardId}/withdraw`,
+      { amount, description },
+    );
+    return response.data;
+  }
+
   async listCardTransactions(
     cardId: string | number,
     query: Record<string, any> = {},

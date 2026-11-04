@@ -131,7 +131,8 @@ client.initiatePayment(paymentData: PaymentData): Promise<PaymentResponse>
 interface PaymentData {
   amount: number;
   currency?: Currency;               // XAF | XOF | EUR | USD
-  payment_method: PaymentMethod;     // mtn_mobile_money | orange_money
+  payment_method?: PaymentMethod;    // mtn_mobile_money | orange_money
+  channel_code?: string;             // e.g. ORANGE_CMR — alternative to payment_method
   customer_phone: string;            // E.164, e.g. +237677123456
   customer_name?: string;
   customer_email?: string;
@@ -140,6 +141,17 @@ interface PaymentData {
   /** Optional surcharge routed to the SURCHARGE wallet — see billing profile. */
   surcharge?: number;
 }
+```
+
+Provide **either** `payment_method` **or** `channel_code` (a code from
+`listChannels()`). With `channel_code`, the currency is taken from the channel:
+
+```typescript
+const payment = await client.initiatePayment({
+  amount: 1000,
+  channel_code: 'ORANGE_CMR',
+  customer_phone: '+237699000000',
+});
 ```
 
 #### MTN Mobile Money (Cameroon)
@@ -186,6 +198,148 @@ const payment = await client.initiatePayment({
   customer_phone: normalizeCameroonPhone('677123456'), // → +237677123456
 });
 ```
+
+### Channels
+
+List the payment channels available to your app (mobile money, bills, cash-in).
+Pass a channel's `code` as `channel_code` on `initiatePayment()` /
+`createPayout()`. The provider that fulfils a channel is internal and never
+returned.
+
+```typescript
+// All channels
+const channels = await client.listChannels();
+
+// Filtered: payout-capable mobile-money channels in Cameroon
+const payoutChannels = await client.listChannels({
+  type: 'mobile_money',
+  direction: 'payout',
+  country: 'CMR',
+});
+// → [{ code: 'ORANGE_CMR', name: 'Orange Money (Cameroon)', currency: 'XAF', ... }]
+
+// Filters: { type?, direction?, country? (ISO-3), category?, name? }
+```
+
+#### Detecting the channel from a phone number
+
+`detectChannel()` guesses the mobile-money channel from the operator prefix,
+so you can pre-select it in your checkout. It runs locally (no API call).
+
+```typescript
+import { detectChannel, detectCountry } from '@elgiosoft/elgiopay-sdk';
+
+detectChannel('+237677123456');      // → 'MTN_CMR'
+detectChannel('024 123 4567', 'GH'); // → 'MTN_GHA' (ISO-2 or ISO-3 country)
+detectChannel('+237123');            // → null (operator unknown)
+detectCountry('+254712345678');      // → 'KEN'
+```
+
+Numbers can be ported between operators, and some wallets work on any
+number, so treat the result as a default the customer can change. It returns
+`null` rather than guessing when the country or operator can't be told.
+
+### Connected Merchants (platform apps)
+
+If your merchant is a **platform**, you can onboard sub-merchants, charge on
+their behalf and settle them. Two things must both be true or the API answers
+`403 NOT_A_PLATFORM`: the merchant is a platform, *and* the specific app whose
+key you're using is flagged as a platform app. A platform's own storefront app
+is deliberately not one.
+
+A connected merchant lives inside exactly one app: the app whose key created
+it. There's no app parameter, and a merchant created with app A's key is
+invisible to app B's key — listing, lookup, balance, payouts and
+`sub_merchant_id` charges are all scoped to the calling app.
+
+```typescript
+// 1. Onboard. Provide `email` plus company_name OR first_name.
+const merchant = await client.connectedMerchants.create({
+  email: 'shop@example.cm',
+  company_name: 'Boutique Mballa',
+  metadata: { external_id: 'shop_42' },
+});
+// → { merchant_id: 'mch_…', kyc_status: 'pending', onboarding_url: 'https://…/onboard/…', … }
+
+// 2. Send them to `onboarding_url` to complete their own KYC. You deliver the
+//    link however you already reach them — elgiopay does not email your
+//    merchants. It's single-use and valid 24h: opening it starts their session
+//    and spends the link, so a forwarded copy won't work afterwards.
+//
+//    That URL is returned ONLY by the call that mints it. Nothing reads it
+//    back; if you lose it, or it expired unopened, mint another:
+const { onboarding_url } = await client.connectedMerchants.createOnboardingLink(
+  merchant.merchant_id,
+);
+
+//    Track progress via connected_merchant.kyc.submitted / .approved /
+//    .rejected, or read the link's state — never the token itself:
+const { onboarding } = await client.connectedMerchants.get(merchant.merchant_id);
+// → { link_pending: true, link_expires_at: '…', link_opened_at: null }
+
+// 3. Charge on its behalf — the net amount credits ITS balance, not your float.
+await client.initiatePayment({
+  amount: 5000,
+  payment_method: 'mtn_mobile_money',
+  customer_phone: '+237677389120',
+  sub_merchant_id: merchant.merchant_id,
+});
+
+// Card charges route the same way. The card settlement hold applies to the
+// sub-merchant's ledger rather than your float.
+await client.cards.processPayment({
+  amount: 100,
+  currency: 'USD',
+  customer_name: 'Marie Tchana',
+  payment_method_id: 'pm_123',
+  sub_merchant_id: merchant.merchant_id,
+});
+
+// 4. Read and settle.
+const balance = await client.connectedMerchants.getBalance(merchant.merchant_id);
+await client.connectedMerchants.createPayout(merchant.merchant_id, {
+  amount: 4000,
+  payout_method: 'mtn_mobile_money',
+  recipient_name: 'Jean Mballa',
+  recipient_phone: '677389120',
+});
+
+// Listing + lifecycle
+const { data, meta } = await client.connectedMerchants.list({ per_page: 25 });
+await client.connectedMerchants.get(merchant.merchant_id);
+await client.connectedMerchants.deactivate(merchant.merchant_id); // freeze
+await client.connectedMerchants.reactivate(merchant.merchant_id);
+```
+
+Branch on the machine-readable code rather than the message:
+
+```typescript
+try {
+  await client.connectedMerchants.create({ email: 'shop@example.cm' });
+} catch (e) {
+  if (e instanceof ElgioPayError && e.errorCode === 'NOT_A_PLATFORM') {
+    // This app's merchant isn't a platform.
+  }
+}
+```
+
+Codes: `NOT_A_PLATFORM`, `NOT_YOUR_MERCHANT`, `MERCHANT_INACTIVE`,
+`KYC_ALREADY_APPROVED`, `PAYOUT_FAILED`, `VALIDATION_ERROR`, and on a charge —
+`SUB_MERCHANT_NOT_FOUND` / `_NOT_CONNECTED` / `_NOT_YOURS` / `_INACTIVE`.
+
+Webhooks (`connected_merchant.created`, `.kyc.submitted`, `.kyc.approved`,
+`.kyc.rejected`, `.payout.paid`, `.payout.failed`, `.deactivated`,
+`.reactivated`) are delivered to the **platform's** webhook URL, never the
+sub-merchant's. See `WebhookEvents.CONNECTED_MERCHANT_*`.
+
+> **Two things to know.** A connected merchant can verify itself through the
+> hosted link, but it still has no login — it cannot sign in to a dashboard, and
+> everything else about it is managed through your platform key. And
+> `capabilities` is advisory: both flags are reported `true` for every connected
+> merchant regardless of KYC, because the charge path doesn't check it. Don't use
+> them to decide whether you may charge — and note a payout for an unverified
+> merchant can still be refused by the KYC amount caps despite
+> `payouts_enabled: true`.
 
 ### Payment Status and Verification
 

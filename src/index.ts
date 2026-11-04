@@ -8,9 +8,11 @@
 export { ElgioPayClient } from './client';
 export { CardClient } from './resources/card';
 export { IssuingClient } from './resources/issuing';
+export { ConnectedMerchantsClient } from './resources/connectedMerchants';
 export { verifyWebhook, DEFAULT_TOLERANCE_SECONDS } from './webhooks/signature';
 export type { VerifyOptions } from './webhooks/signature';
 export { WebhookEvents, ALL_WEBHOOK_EVENTS } from './webhooks/events';
+export { detectChannel, detectCountry } from './detectChannel';
 export {
   ElgioPayConfig,
   PaymentData,
@@ -35,6 +37,9 @@ export {
   BillService,
   CheckBillData,
   PayBillData,
+  // Channels
+  Channel,
+  ChannelFilters,
   // Cards
   CardInitResponse,
   CardProcessData,
@@ -64,6 +69,20 @@ export {
   IssuingEphemeralKey,
   IssuingListResponse,
   IssuingItemResponse,
+  // Connected merchants (platform apps)
+  ConnectedMerchantKycStatus,
+  ConnectedMerchantCapabilities,
+  ConnectedMerchant,
+  ConnectedMerchantInput,
+  ConnectedMerchantCreateResponse,
+  ConnectedMerchantOnboardingState,
+  ConnectedMerchantOnboardingLink,
+  ConnectedMerchantListResponse,
+  ConnectedMerchantBalance,
+  ConnectedMerchantPayoutInput,
+  ConnectedMerchantPayoutResponse,
+  ConnectedMerchantStatusResponse,
+  ConnectedMerchantErrorCode,
   // Webhooks
   WebhookEvent,
   WebhookEnvelope,

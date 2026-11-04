@@ -10,6 +10,16 @@ export type PaymentStatus = 'pending' | 'processing' | 'completed' | 'failed' | 
 /** Wallet a payout is drawn from. DEFAULT is the primary balance;
  *  SURCHARGE is the fee-collection wallet. */
 export type PayoutSource = 'DEFAULT' | 'SURCHARGE';
+
+/**
+ * Mobile-money payouts settle through the operator, usually within seconds.
+ *
+ * `bank_transfer` is different: it is settled by an elgiopay operator making the
+ * transfer, so the payout comes back `pending` and reaches `completed` 1–3
+ * business days later. Wait for the `payout.completed` webhook rather than
+ * treating the create response as confirmation. `payout.failed` fires (and the
+ * funds are returned in full) if the bank rejects it.
+ */
 export type PayoutMethod = 'mtn_mobile_money' | 'orange_money' | 'bank_transfer';
 
 export interface ElgioPayConfig {
@@ -21,7 +31,14 @@ export interface ElgioPayConfig {
 export interface PaymentData {
   amount: number;
   currency?: Currency;
-  payment_method: PaymentMethod;
+  /** Legacy fixed method. Provide EITHER this OR `channel_code`. */
+  payment_method?: PaymentMethod;
+  /**
+   * A payment-channel code from `listChannels()` (e.g. `ORANGE_CMR`,
+   * `MTN_CMR`). An alternative to `payment_method` — provide exactly one.
+   * When set, the currency is taken from the channel.
+   */
+  channel_code?: string;
   customer_phone: string;
   customer_name?: string;
   customer_email?: string;
@@ -30,6 +47,14 @@ export interface PaymentData {
   /** Optional add-on flowing to the SURCHARGE wallet when it exceeds
    *  the platform's own fee. See the billing profile for details. */
   surcharge?: number;
+  /**
+   * Attribute this charge to one of your connected merchants — pass the
+   * `merchant_id` returned by `connectedMerchants.create()`. On completion
+   * the net amount credits that merchant's own balance instead of your app
+   * float. Platform apps only; the sub-merchant must live in the app whose
+   * key signs the request.
+   */
+  sub_merchant_id?: string;
 }
 
 export interface PaymentResponse {
@@ -81,18 +106,69 @@ export interface PayoutData {
   currency?: Currency;
   /** Which wallet to debit — defaults to DEFAULT server-side. */
   source?: PayoutSource;
-  payout_method: PayoutMethod;
+  /** Legacy fixed method. Provide EITHER this OR `channel_code`. */
+  payout_method?: PayoutMethod;
+  /**
+   * A payment-channel code from `listChannels({ direction: 'payout' })`
+   * (e.g. `ORANGE_CMR`, `AIRTEL_GAB`). An alternative to `payout_method` —
+   * provide exactly one. When set, the currency is taken from the channel.
+   */
+  channel_code?: string;
   /** Required for mtn_mobile_money / orange_money. */
   recipient_phone?: string;
   recipient_name: string;
   recipient_email?: string;
-  /** Required for bank_transfer. */
+  /**
+   * Required for bank_transfer. The account number as the bank gives it — the
+   * plain `numéro de compte` is fine, with the bank identified by `bank_name`
+   * and optionally `bank_code`. Separators are ignored.
+   *
+   * If you send the full 23-character RIB or a CEMAC IBAN instead, its check
+   * digits are validated server-side, so a mistyped one comes back as a 422
+   * rather than a transfer that bounces days later. A plain account number has no
+   * check digits and is accepted as given.
+   */
   bank_account_number?: string;
+  /** Required for bank_transfer. */
   bank_name?: string;
   bank_code?: string;
   reference?: string;
   description?: string;
   metadata?: Record<string, any>;
+}
+
+/** A payment channel returned by `listChannels()`. */
+export interface Channel {
+  code: string;
+  name: string;
+  name_i18n?: { en?: string; fr?: string } | null;
+  type: 'mobile_money' | 'bill' | 'bank_transfer' | 'card' | string;
+  direction: 'collect' | 'payout' | 'both' | string;
+  category?: string | null;
+  country_iso: string;
+  currency: string;
+  min_amount?: number | null;
+  max_amount?: number | null;
+  denomination?: number | null;
+  requires_service_number?: boolean;
+  requires_customer_name?: boolean;
+  requires_customer_number?: boolean;
+  requires_customer_address?: boolean;
+  is_verifiable?: boolean;
+  validation_mask?: string | null;
+  input_hint_i18n?: { en?: string; fr?: string } | null;
+  input_label_i18n?: { en?: string; fr?: string } | null;
+}
+
+/** Optional filters for `listChannels()`. */
+export interface ChannelFilters {
+  type?: 'mobile_money' | 'bill' | 'bank_transfer' | 'card';
+  direction?: 'collect' | 'payout';
+  /** ISO 3166-1 alpha-3, e.g. `CMR`. */
+  country?: string;
+  category?: string;
+  /** Partial, case-insensitive match on the display name. */
+  name?: string;
 }
 
 export interface Payout {
@@ -171,6 +247,14 @@ export interface CardProcessData {
   customer_email?: string;
   reference?: string;
   description?: string;
+  /**
+   * Attribute this card charge to one of your connected merchants — pass the
+   * `merchant_id` returned by `connectedMerchants.create()`. On completion the
+   * net amount credits that merchant's own balance instead of your app float,
+   * and the card settlement hold lands on their ledger. Platform apps only;
+   * the sub-merchant must live in the app whose key signs the request.
+   */
+  sub_merchant_id?: string;
 }
 
 export interface CardProcessResponse {
@@ -486,6 +570,160 @@ export interface IssuingItemResponse<T> {
   message?: string;
 }
 
+// ─── Connected merchants (platform apps) ─────────────────────────────
+//
+// Only usable with a *platform* merchant's API key — every endpoint 403s
+// with NOT_A_PLATFORM otherwise. A connected merchant lives inside exactly
+// one app (the one whose key created it), so there is no app parameter.
+
+export type ConnectedMerchantKycStatus =
+  | 'pending'
+  | 'submitted'
+  | 'approved'
+  | 'rejected';
+
+/**
+ * Advisory only. Both flags are currently reported `true` for every connected
+ * merchant regardless of KYC state, because nothing gates charges on it — so
+ * don't use these to decide whether you may charge or pay out. Payouts for an
+ * unverified merchant can still be refused by the KYC amount caps at request
+ * time, despite `payouts_enabled: true`.
+ */
+export interface ConnectedMerchantCapabilities {
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+}
+
+/**
+ * State of the sub-merchant's hosted KYC link — never the link itself.
+ *
+ * The URL is returned exactly once, by the call that mints it (`create` or
+ * `createOnboardingLink`). If you lose it, mint another; there is no endpoint
+ * that reads one back.
+ */
+export interface ConnectedMerchantOnboardingState {
+  /** True while a link exists that has not been opened and has not expired. */
+  link_pending: boolean;
+  link_expires_at: string | null;
+  /** When the merchant first opened the link. Null if they never did. */
+  link_opened_at: string | null;
+}
+
+export interface ConnectedMerchant {
+  /** Public uid — pass this as `sub_merchant_id` when charging. */
+  merchant_id: string;
+  type: 'connected';
+  company_name: string | null;
+  kyc_status: ConnectedMerchantKycStatus;
+  capabilities: ConnectedMerchantCapabilities;
+  onboarding: ConnectedMerchantOnboardingState;
+  created_at: string | null;
+}
+
+export interface ConnectedMerchantInput {
+  email: string;
+  /** Required unless `first_name` is given. */
+  company_name?: string;
+  /** Required unless `company_name` is given. */
+  first_name?: string;
+  last_name?: string;
+  business_type?: string;
+  /** ISO 3166-1 alpha-2. Defaults to `CM` server-side. */
+  country?: string;
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Deliberately identical in shape whether or not the email already existed
+ * (enumeration resistance), so don't infer "new vs existing" from it.
+ */
+export interface ConnectedMerchantCreateResponse {
+  merchant_id: string;
+  type: 'connected';
+  kyc_status: ConnectedMerchantKycStatus;
+  capabilities: ConnectedMerchantCapabilities;
+  /**
+   * Hosted KYC URL to send the sub-merchant. **Returned only here** — store or
+   * forward it now, because it cannot be read back later.
+   *
+   * Single-use and valid for 24 hours: opening it starts the merchant's session
+   * and spends the link, so it cannot be shared or re-opened elsewhere
+   * afterwards. Call `createOnboardingLink()` for a replacement.
+   */
+  onboarding_url: string;
+  /** ISO 8601. 24 hours from issue. */
+  onboarding_expires_at: string;
+  status: 'created';
+}
+
+/** Response of `createOnboardingLink()`. */
+export interface ConnectedMerchantOnboardingLink {
+  merchant_id: string;
+  /** As with create: shown once, not retrievable. */
+  onboarding_url: string;
+  onboarding_expires_at: string;
+}
+
+export interface ConnectedMerchantListResponse {
+  data: ConnectedMerchant[];
+  meta: { current_page: number; last_page: number; total: number };
+}
+
+export interface ConnectedMerchantBalance {
+  merchant_id: string;
+  currency: Currency | string;
+  balance: number;
+  available_balance: number;
+  reserved_balance: number;
+}
+
+export interface ConnectedMerchantPayoutInput {
+  amount: number;
+  currency?: Currency;
+  payout_method: PayoutMethod;
+  recipient_name: string;
+  recipient_phone?: string;
+  recipient_email?: string;
+  /** Required when `payout_method` is `bank_transfer`. */
+  bank_account_number?: string;
+  /** Required when `payout_method` is `bank_transfer`. */
+  bank_name?: string;
+  bank_code?: string;
+  description?: string;
+  reference?: string;
+}
+
+export interface ConnectedMerchantPayoutResponse {
+  payout_id: string;
+  merchant_id: string;
+  amount: number;
+  currency: string;
+  status: string;
+}
+
+export interface ConnectedMerchantStatusResponse {
+  merchant_id: string;
+  is_active: boolean;
+  status: 'activated' | 'deactivated' | 'reactivated';
+}
+
+/**
+ * Machine-readable `error` codes the connected-merchant and sub-merchant
+ * routing endpoints return. Read them off `ElgioPayError.errorCode`.
+ */
+export type ConnectedMerchantErrorCode =
+  | 'NOT_A_PLATFORM'
+  | 'NOT_YOUR_MERCHANT'
+  | 'MERCHANT_INACTIVE'
+  /** `createOnboardingLink` on a merchant that is already verified. */
+  | 'KYC_ALREADY_APPROVED'
+  | 'PAYOUT_FAILED'
+  | 'VALIDATION_ERROR'
+  | 'SUB_MERCHANT_NOT_FOUND'
+  | 'SUB_MERCHANT_NOT_CONNECTED'
+  | 'SUB_MERCHANT_NOT_YOURS'
+  | 'SUB_MERCHANT_INACTIVE';
+
 // ─── Webhooks ────────────────────────────────────────────────────────
 //
 // elgiopay signs every outbound webhook with an HMAC-SHA256. Verify
@@ -509,7 +747,16 @@ export type WebhookEvent =
   | 'issuing_card.terminated'
   | 'issuing_card.expiration'
   | 'issuing_authorization.created'
-  | 'issuing_transaction.created';
+  | 'issuing_transaction.created'
+  // Connected merchants — delivered to the PLATFORM's webhook URL.
+  | 'connected_merchant.created'
+  | 'connected_merchant.kyc.submitted'
+  | 'connected_merchant.kyc.approved'
+  | 'connected_merchant.kyc.rejected'
+  | 'connected_merchant.payout.paid'
+  | 'connected_merchant.payout.failed'
+  | 'connected_merchant.deactivated'
+  | 'connected_merchant.reactivated';
 
 export interface WebhookEnvelope<T = Record<string, any>> {
   id: string;
@@ -524,12 +771,19 @@ export interface WebhookEnvelope<T = Record<string, any>> {
 export class ElgioPayError extends Error {
   public code: number;
   public response?: any;
+  /**
+   * The API's machine-readable `error` string when it sent one (e.g.
+   * `NOT_A_PLATFORM`, `SUB_MERCHANT_NOT_YOURS`). Prefer branching on this
+   * over matching `message`, which is human-facing and may change.
+   */
+  public errorCode?: string;
 
   constructor(message: string, code: number = 500, response?: any) {
     super(message);
     this.name = 'ElgioPayError';
     this.code = code;
     this.response = response;
+    this.errorCode = response?.error;
 
     // Maintains proper stack trace for where our error was thrown (only available on V8)
     if (typeof Error.captureStackTrace === 'function') {
