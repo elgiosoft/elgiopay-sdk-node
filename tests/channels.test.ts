@@ -73,6 +73,30 @@ describe('Channels & channel_code', () => {
     }));
   });
 
+  test('createPayout returns the payout with fees and total debited', async () => {
+    post.mockResolvedValueOnce({
+      data: {
+        payout_id: 'PO_1',
+        status: 'pending',
+        amount: { total: 5000, currency: 'XAF', fees: 100, total_debited: 5100 },
+        payout_method: 'mtn_mobile_money',
+        recipient: { phone: '677000000', name: 'Jean' },
+        created_at: '2026-11-06T10:00:00Z',
+        updated_at: '2026-11-06T10:00:00Z',
+      },
+    });
+
+    const payout = await client.createPayout({
+      amount: 5000,
+      payout_method: 'mtn_mobile_money',
+      recipient_name: 'Jean',
+      recipient_phone: '677000000',
+    } as any);
+
+    expect(payout.amount.fees).toBe(100);
+    expect(payout.amount.total_debited).toBe(5100);
+  });
+
   test('listChannels hits /channels with filters and returns the array', async () => {
     get.mockResolvedValueOnce({
       data: { success: true, data: [{ code: 'ORANGE_CMR', name: 'Orange Money (Cameroon)', type: 'mobile_money' }] },

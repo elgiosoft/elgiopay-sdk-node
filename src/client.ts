@@ -11,6 +11,8 @@ import {
   BalanceResponse,
   PayoutData,
   PayoutResponse,
+  Payout,
+  PayoutList,
   ValidateRecipientResponse,
   BillService,
   CheckBillData,
@@ -180,7 +182,7 @@ export class ElgioPayClient {
    * — check the pagination envelope for `next_page_url` if you need
    * more than the first page.
    */
-  async getPayouts<T = unknown>(): Promise<T> {
+  async getPayouts<T = PayoutList>(): Promise<T> {
     const response = await this.client.get<T>('/api/v1/payouts');
     return response.data;
   }
@@ -203,7 +205,7 @@ export class ElgioPayClient {
    * Fetch the current status of a payout. Same lifecycle as payments —
    * `pending` → `processing` → `completed` / `failed` / `cancelled`.
    */
-  async getPayoutStatus<T = unknown>(payoutId: string): Promise<T> {
+  async getPayoutStatus<T = Payout>(payoutId: string): Promise<T> {
     const response = await this.client.get<T>(`/api/v1/payouts/${payoutId}`);
     return response.data;
   }

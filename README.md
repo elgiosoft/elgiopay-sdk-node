@@ -341,6 +341,17 @@ sub-merchant's. See `WebhookEvents.CONNECTED_MERCHANT_*`.
 > merchant can still be refused by the KYC amount caps despite
 > `payouts_enabled: true`.
 
+### Payout fees
+
+Payout fees are charged on top of the amount: the recipient gets
+`amount.total`, and your balance is debited `amount.total_debited`
+(`total + fees`).
+
+```typescript
+const payout = await client.createPayout({ /* ... */ });
+payout.amount; // → { total: 5000, currency: 'XAF', fees: 100, total_debited: 5100 }
+```
+
 ### Payment Status and Verification
 
 ```typescript

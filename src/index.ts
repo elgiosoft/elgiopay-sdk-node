@@ -32,6 +32,8 @@ export {
   PayoutData,
   Payout,
   PayoutResponse,
+  PayoutAmount,
+  PayoutList,
   ValidateRecipientResponse,
   // Bills
   BillService,

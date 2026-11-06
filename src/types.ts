@@ -171,31 +171,50 @@ export interface ChannelFilters {
   name?: string;
 }
 
+export interface PayoutAmount {
+  /** What the recipient receives. */
+  total: number;
+  currency: Currency | string;
+  /** Platform fee, charged on top of `total`. */
+  fees: number;
+  /** What left your balance: `total + fees`. */
+  total_debited: number;
+}
+
+/** A payout, as returned by the payout endpoints and `payout.*` webhooks. */
 export interface Payout {
   payout_id: string;
   status: PaymentStatus;
-  amount: number;
-  /** Platform fee — debited on top of `amount`. Recipient still gets the
-   *  full amount; the merchant is charged `amount + fees`. */
-  fees: number;
-  currency: Currency | string;
-  source: PayoutSource;
+  amount: PayoutAmount;
   payout_method: PayoutMethod;
-  recipient_phone?: string;
-  recipient_name?: string;
-  recipient_email?: string;
+  recipient: {
+    phone?: string;
+    name?: string;
+    email?: string;
+  };
   reference?: string;
   description?: string;
+  metadata?: Record<string, unknown>;
+  /** Only present when `status` is `failed`. */
+  failure_reason?: string;
   created_at: string;
+  updated_at: string;
   completed_at?: string;
   failed_at?: string;
-  failure_reason?: string;
 }
 
-export interface PayoutResponse {
+/** `createPayout()` returns the payout itself. */
+export type PayoutResponse = Payout;
+
+export interface PayoutList {
   success: boolean;
-  payout: Payout;
-  message?: string;
+  data: Payout[];
+  pagination: {
+    current_page: number;
+    per_page: number;
+    total: number;
+    has_more: boolean;
+  };
 }
 
 export interface ValidateRecipientResponse {
