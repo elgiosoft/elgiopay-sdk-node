@@ -37,6 +37,17 @@ export const WebhookEvents = {
   ISSUING_CARD_EXPIRATION: 'issuing_card.expiration',
   ISSUING_AUTHORIZATION_CREATED: 'issuing_authorization.created',
   ISSUING_TRANSACTION_CREATED: 'issuing_transaction.created',
+
+  // Connected merchants — always delivered to the PLATFORM's webhook URL,
+  // never the sub-merchant's. `data.merchant_id` names the sub-merchant.
+  CONNECTED_MERCHANT_CREATED: 'connected_merchant.created',
+  CONNECTED_MERCHANT_KYC_SUBMITTED: 'connected_merchant.kyc.submitted',
+  CONNECTED_MERCHANT_KYC_APPROVED: 'connected_merchant.kyc.approved',
+  CONNECTED_MERCHANT_KYC_REJECTED: 'connected_merchant.kyc.rejected',
+  CONNECTED_MERCHANT_PAYOUT_PAID: 'connected_merchant.payout.paid',
+  CONNECTED_MERCHANT_PAYOUT_FAILED: 'connected_merchant.payout.failed',
+  CONNECTED_MERCHANT_DEACTIVATED: 'connected_merchant.deactivated',
+  CONNECTED_MERCHANT_REACTIVATED: 'connected_merchant.reactivated',
 } as const satisfies Record<string, WebhookEvent>;
 
 /** All webhook event names as a runtime array (useful for UI pickers). */

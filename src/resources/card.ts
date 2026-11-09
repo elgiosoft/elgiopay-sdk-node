@@ -39,6 +39,11 @@ export class CardClient {
    *   - `success: true` + `requires_action: true` — 3D Secure needed;
    *     hand `payment_intent_client_secret` back to the frontend and
    *     complete SCA there before calling `confirmPayment()`.
+   *
+   * Platform apps can set `sub_merchant_id` to route the charge to a connected
+   * merchant. It's validated before the transaction is created, so a bad id is
+   * a clean 422 (`SUB_MERCHANT_NOT_FOUND` / `_NOT_CONNECTED` / `_NOT_YOURS` /
+   * `_INACTIVE`) with no charge attempted.
    */
   async processPayment(paymentData: CardProcessData): Promise<CardProcessResponse> {
     const response = await this.client.post<CardProcessResponse>(

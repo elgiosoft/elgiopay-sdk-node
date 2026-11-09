@@ -11,10 +11,14 @@ import {
   BalanceResponse,
   PayoutData,
   PayoutResponse,
+  Payout,
+  PayoutList,
   ValidateRecipientResponse,
   BillService,
   CheckBillData,
   PayBillData,
+  Channel,
+  ChannelFilters,
   SmsChannel,
   SmsResponse,
 } from './types';
@@ -28,6 +32,7 @@ import {
 } from './utils';
 import { CardClient } from './resources/card';
 import { IssuingClient } from './resources/issuing';
+import { ConnectedMerchantsClient } from './resources/connectedMerchants';
 
 /**
  * Main entry point to the ElgioPay API. Handles mobile-money payments,
@@ -46,6 +51,9 @@ export class ElgioPayClient {
   /** Card-issuing sub-client. Lazily instantiated. */
   private _issuing: IssuingClient | null = null;
 
+  /** Connected-merchant sub-client (platform apps). Lazily instantiated. */
+  private _connectedMerchants: ConnectedMerchantsClient | null = null;
+
   constructor(config: ElgioPayConfig = {}) {
     // Get from environment variables if not provided
     this.apiKey = config.apiKey || process.env.ELGIOPAY_API_KEY || '';
@@ -63,7 +71,7 @@ export class ElgioPayClient {
         'Authorization': `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'User-Agent': 'ElgioPay-Node-SDK/1.0.0',
+        'User-Agent': 'ElgioPay-Node-SDK/1.1.0',
       },
     });
 
@@ -174,7 +182,7 @@ export class ElgioPayClient {
    * — check the pagination envelope for `next_page_url` if you need
    * more than the first page.
    */
-  async getPayouts<T = unknown>(): Promise<T> {
+  async getPayouts<T = PayoutList>(): Promise<T> {
     const response = await this.client.get<T>('/api/v1/payouts');
     return response.data;
   }
@@ -197,7 +205,7 @@ export class ElgioPayClient {
    * Fetch the current status of a payout. Same lifecycle as payments —
    * `pending` → `processing` → `completed` / `failed` / `cancelled`.
    */
-  async getPayoutStatus<T = unknown>(payoutId: string): Promise<T> {
+  async getPayoutStatus<T = Payout>(payoutId: string): Promise<T> {
     const response = await this.client.get<T>(`/api/v1/payouts/${payoutId}`);
     return response.data;
   }
@@ -247,6 +255,22 @@ export class ElgioPayClient {
     return response.data;
   }
 
+  // ─── Channels ──────────────────────────────────────────────────────
+
+  /**
+   * List the payment channels available to your app — mobile money, bills,
+   * cash-in — optionally filtered. Pass a channel's `code` as `channel_code`
+   * on `initiatePayment()` / `createPayout()`. Which provider fulfils a
+   * channel is internal and never returned.
+   */
+  async listChannels(filters: ChannelFilters = {}): Promise<Channel[]> {
+    const response = await this.client.get<{ success: boolean; data: Channel[] }>(
+      '/api/v1/channels',
+      { params: filters }
+    );
+    return response.data.data;
+  }
+
   // ─── Services ──────────────────────────────────────────────────────
 
   /**
@@ -293,6 +317,19 @@ export class ElgioPayClient {
     return this._issuing;
   }
 
+  /**
+   * Connected-merchant sub-client — onboard sub-merchants, read their
+   * balances and pay them out. Requires a *platform* merchant AND a
+   * platform-flagged app; every call 403s with `NOT_A_PLATFORM` otherwise.
+   * Lazily instantiated.
+   */
+  get connectedMerchants(): ConnectedMerchantsClient {
+    if (this._connectedMerchants === null) {
+      this._connectedMerchants = new ConnectedMerchantsClient(this.client);
+    }
+    return this._connectedMerchants;
+  }
+
   // ─── Internals ─────────────────────────────────────────────────────
 
   /**
@@ -303,6 +340,11 @@ export class ElgioPayClient {
   private validatePaymentData(paymentData: PaymentData): void {
     if (!validateAmount(paymentData.amount, paymentData.currency)) {
       throw new ElgioPayError('Invalid amount. Minimum 100 XAF required.', 400);
+    }
+
+    // Exactly one routing selector: a legacy payment_method OR a channel_code.
+    if (!paymentData.payment_method && !paymentData.channel_code) {
+      throw new ElgioPayError('Provide either payment_method or channel_code.', 400);
     }
 
     if (!isValidCameroonPhone(paymentData.customer_phone)) {
